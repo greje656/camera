@@ -1,0 +1,32 @@
+// About
+//
+name = "Camera Plugin"
+description = "Camera Plugin."
+version = "0.2.0"
+author = {
+    name = "Jp"
+    url = "https://github.com/greje656/camera_plugin#camera_plugin"
+}
+repository = {
+    type = "git"
+    url = "https://github.com/greje656/camera_plugin.git"
+}
+keywords = ["flare", "plugin"]
+thumbnail = "thumbnail.png"
+
+// Extensions
+//
+extensions = {
+    resources = [
+        {
+            path = "camera-resources"
+        }
+    ]
+}
+
+// Dependencies
+//
+platforms = ["win64"]
+dependencies = {
+	"stingray" = ">=1.7"
+}

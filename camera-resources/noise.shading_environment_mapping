@@ -1,0 +1,5 @@
+shading_component_mapping = {
+	noise_black = { type="scalar" path=["noise_black"] }
+	noise_white = { type="scalar" path=["noise_white"] }
+	noise_chroma = { type="scalar" path=["noise_chroma"] }
+}

@@ -1,0 +1,65 @@
+append = {	
+	render_settings = {
+		lens_flare_enabled = true
+	}
+
+	shader_libraries = [
+		"camera-resources/camera"
+	]
+
+	global_resources = [
+		{ name="flare_short" type="render_target" depends_on="output_target" w_scale=0.05 h_scale=1 format="R16G16B16A16F" }
+		{ name="flare_long" type="render_target" depends_on="output_target" w_scale=0.005 h_scale=1 format="R16G16B16A16F" }
+		{ name="flare1_div4" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=1 format="R16G16B16A16F" }
+		{ name="flare2_div4" type="render_target" depends_on="output_target" w_scale=0.25 h_scale=1 format="R16G16B16A16F" }
+		
+		{ name="lens_color_map" type="texture" resource="camera-resources/lens_color" }
+		{ name="ghosts_color_map" type="texture" resource="camera-resources/ghosts_color" }
+	]
+
+	resource_generators = {
+	}
+}
+
+insert_at = {
+
+	post_processing_bloom = { 
+		modifiers = [
+			{ type="fullscreen_pass" shader="filter:DOWNSAMPLE_4x4" input="hdr0" output="flare1_div4" }
+			{ type="fullscreen_pass" shader="ghosts_bright_pass" input="flare1_div4" output="flare2_div4" }
+			{ type="fullscreen_pass" shader="lens_flare" input="flare2_div4" output="flare1_div4" }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare1_div4"] output=["flare2_div4"] }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["flare2_div4"] output=["flare1_div4"] }
+
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare1_div4"] output=["flare2_div4"] }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_Y" input=["flare2_div4"] output=["flare1_div4"] }
+
+			{ type="fullscreen_pass" shader="flare_merge_pass" input=["hdr0" "flare1_div4"] output=["hdr0"] }
+
+			{ type="fullscreen_pass" shader="flare_bright_pass:SHORT" input=["hdr0"] output=["flare_short"] }
+			{ type="fullscreen_pass" shader="flare_bright_pass:LONG" input=["hdr0"] output=["flare_long"] }
+
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare_short"] output=["flare_short"] }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare_short"] output=["flare_short"] }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare_short"] output=["flare_short"] }
+			{ type="fullscreen_pass" shader="flare_merge_pass" input=["hdr0" "flare_short"] output=["hdr0"] }
+
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare_long"] output=["flare_long"] }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare_long"] output=["flare_long"] }
+			{ type="fullscreen_pass" shader="filter:SEPARABLE_BILINEAR_GAUSSIAN_5TAP_X" input=["flare_long"] output=["flare_long"] }
+
+			{ type="fullscreen_pass" shader="flare_merge_pass" input=["hdr0" "flare_long" "flare1_div4"] output=["hdr0"] }
+		]
+	}
+
+	post_processing_end = { 
+		modifiers = [
+			{ type="dynamic_branch" shading_environment={ tone_mapping_enabled=false }
+				pass = [
+					{ type="fullscreen_pass" shader="ACES_scene_combine" input=["scene_combine_output_target"] output=["output_target"] }
+				]
+			}
+		]
+	}
+
+}

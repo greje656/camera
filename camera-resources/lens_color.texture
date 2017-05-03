@@ -1,0 +1,73 @@
+android = {
+	output = {
+		format = "R8G8B8A8"
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+web = {
+	output = {
+		format = "DXT1"
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+win32 = {
+	output = {
+		format = "DXT1"
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+ps4 = {
+	output = {
+		format = "DXT1"
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+ios = {
+	output = {
+		format = "R8G8B8A8"
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+xb1 = {
+	output = {
+		format = "DXT1"
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+common = {
+	input = {
+		filename = "camera-resources/lens_color"
+	}
+	output = {
+		cut_alpha_threshold = 0.5
+		enable_cut_alpha_threshold = false
+		mipmap_filter = "box"
+		resident_mips = 0
+		mipmap_num_smallest_steps_to_discard = 0
+		apply_processing = true
+		mipmap_keep_original = false
+		category = ""
+		mipmap_filter_wrap_mode = "mirror"
+		mipmap_num_largest_steps_to_discard = 0
+		streamable = false
+	}
+}
+"$revision" = 1
+linux = {
+	output = {
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}
+uwp = {
+	output = {
+		mipmap_filter = "kaiser"
+		category = ""
+	}
+}

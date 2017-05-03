@@ -1,0 +1,62 @@
+export = "#component"
+types = {
+    component = {
+        type = ":struct"
+        implements = {
+            "core/types/component" = true
+        }
+        fields = {
+            shading_environment_mapping = {
+                type = ":resource"
+                extension = "shading_environment_mapping"
+                default = {
+                    "$resource_name" = "camera-resources/noise"
+                    "$resource_type" = "shading_environment_mapping"
+                }
+                editor = {
+                    visible = false
+                }
+            }
+            noise_black = {
+                type = ":number"
+                default = 1
+                min = 0.0
+                max = 50.0
+                editor = {
+                    label = "Noise Black"
+                    step = 0.001
+                }
+            }
+            noise_white = {
+                type = ":number"
+                default = 1
+                min = 0.0
+                max = 50.0
+                editor = {
+                    label = "Noise White"
+                    step = 0.001
+                }
+            }
+            noise_chroma = {
+                type = ":number"
+                default = 0.5
+                min = 0.0
+                max = 1.0
+                editor = {
+                    label = "Noise Chroma"
+                    step = 0.001
+                }
+            }
+        }
+        editor = {
+            category = "Noise"
+            priority = 12
+            icon = "certificate"
+        }
+        metadata = {
+            component = "render_data"
+            tags = ["shading_environment"]
+            name = "Noise"
+        }
+    }
+}

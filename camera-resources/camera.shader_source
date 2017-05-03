@@ -1,0 +1,522 @@
+includes = [ "core/stingray_renderer/shader_libraries/common.shader_source",
+			 "core/stingray_renderer/shader_libraries/color_management.shader_source",
+			 "core/stingray_renderer/shader_libraries/post_processing_common.shader_source" ]
+
+render_states = {
+	filter = {
+		inherits = "default_stencil_reject_msb"
+		states = {
+			z_write_enable = "false"
+			z_enable = "false"
+		}
+	}
+}
+
+hlsl_shaders = {
+
+	flare_bright_pass = {
+		includes = [ "common", "gbuffer_access", "color_management" ]
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+		}
+
+		code="""
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(current_exposure);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 flare_threshold_offset_falloff;
+				float2 input_texture0_size;
+				float2 output_target_base_size;
+				float exposure;
+				float exposure_auto_enabled;
+			CBUFFER_END
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				float4 p = mul(input.position, world_view_proj);
+				o.position = p;
+				o.uv = input.uv;
+
+				return o;
+			}
+
+			half4 ps_main(PS_INPUT input) : SV_TARGET0 {
+
+				int number_of_x_pixels_to_scan = input_texture0_size.x/output_target_base_size.x;
+				int number_of_y_pixels_to_scan = input_texture0_size.y/output_target_base_size.y;
+				float pixel_width = 1.f/output_target_base_size.x;
+				float pixel_height = 1.f/output_target_base_size.y;
+
+				float4 c = 0;
+				float l = 0;
+				
+				[loop]
+				for(int x = 0; x < number_of_x_pixels_to_scan; ++x){
+					for(int y = 0; y < number_of_y_pixels_to_scan; ++y){
+						float f = float(x)/float(number_of_x_pixels_to_scan);
+						float g = float(y)/float(number_of_y_pixels_to_scan);
+						float sampling_u = input.uv.x - pixel_width * 0.5 + pixel_width * f;
+						float sampling_v = input.uv.y - pixel_height * 0.5 + pixel_height * g;
+						float2 sampling_pos = float2(sampling_u, sampling_v);
+						float4 sampling_c = TEX2DLOD(input_texture0, sampling_pos, 0);
+
+						float sampling_l = luminance(sampling_c.rgb);
+
+						[branch]
+						if(sampling_l > l) {
+							c = sampling_c;
+							l = sampling_l;
+						}
+					}
+				}
+
+				c = float4(max(c.rgb - flare_threshold_offset_falloff.x, 0.0), c.a);
+				
+				#if defined(SHORT)
+					c.rgb *= (flare_threshold_offset_falloff.y * 1.1);
+				#else 
+					c.rgb *= (flare_threshold_offset_falloff.z * 1.1);
+				#endif
+
+
+				return c;
+			}
+		"""
+	}
+
+	ghosts_bright_pass = {		
+		includes = [ "common", "gbuffer_access" , "color_management" ]
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+		}
+
+		code="""
+			DECLARE_SAMPLER_2D(input_texture0);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;				
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};			 			
+
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float2 inv_input_texture0_size;
+				float flare_threshold;
+			CBUFFER_END
+
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+
+				return o;
+			}
+			
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {	
+				float4 c = TEX2D(input_texture0, input.uv);
+				float lum_scale = max(luminance(c.rgb) - flare_threshold, 0.f);
+				lum_scale /= (lum_scale + 1.f);
+				return float4(c.rgb * lum_scale, 1.f);
+			}	
+		"""
+	}
+	
+	lens_flare = {
+		includes = [ "common", "gbuffer_access", "const_common" ]
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+			lens_color_map = { sampler_states = "clamp_linear" }
+			ghosts_color_map = { sampler_states = "clamp_linear" }
+		}
+
+		code="""
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(lens_color_map);
+			DECLARE_SAMPLER_2D(ghosts_color_map);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;				
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};			 			
+
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float2 input_texture0_size;
+				float2 inv_input_texture0_size;
+				float ghost_dispersal;
+				float chroma_distortion;
+				float flare_intensity;
+				float ghost_tint;
+				float flare_tint;
+			CBUFFER_END
+
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+
+				return o;
+			}
+
+			#define SAMPLE_COUNT 11
+
+			float3 bicubic_sample_2d(Sampler2D tex, float2 uv, float2 texture_size) {
+				uv *= texture_size;
+				float2 inv_texture_size = 1.0/texture_size;
+				float2 tc = floor(uv-0.5) + 0.5;
+
+				float2 f = uv - tc;
+				float2 f2 = f * f;
+				float2 f3 = f * f2;
+				float4x4 M = {
+					-1.0,  3.0, -3.0,  1.0,
+					 3.0, -6.0,  3.0,  0.0,
+					-3.0,  0.0,  3.0,  0.0,
+					 1.0,  4.0,  1.0,  0.0
+				};
+				M /= 6;
+				float4 wx = mul(float4(f3.x, f2.x, f.x, 1), M);
+				float4 wy = mul(float4(f3.y, f2.y, f.y, 1), M);
+				float2 w0 = float2(wx.x, wy.x);
+				float2 w1 = float2(wx.y, wy.y);
+				float2 w2 = float2(wx.z, wy.z);
+				float2 w3 = float2(wx.w, wy.w);
+
+				float2 g0 = w0 + w1;
+				float2 g1 = w2 + w3;
+				float2 h0 = w1 / g0 - 1;
+				float2 h1 = w3 / g1 + 1;
+
+				float2 c00 = (tc + h0) * inv_texture_size;
+				float2 c11 = (tc + h1) * inv_texture_size;
+
+				float3 t00 = TEX2D(tex, c00).xyz;
+				float3 t10 = TEX2D(tex, float2(c11.x, c00.y)).xyz;
+				float3 t01 = TEX2D(tex, float2(c00.x, c11.y)).xyz;
+				float3 t11 = TEX2D(tex, c11).xyz;
+
+				t00 = lerp(t01, t00, g0.y);
+				t10 = lerp(t11, t10, g0.y);
+				return lerp(t10, t00, g0.x);
+			}
+
+			float4 texture_distorted(float2 uv, float2 direction, float3 distortion ) {
+				
+				//return float4(
+				//	TEX2D(input_texture0, uv + direction * distortion.r).r,
+				//	TEX2D(input_texture0, uv + direction * distortion.g).g,
+				//	TEX2D(input_texture0, uv + direction * distortion.b).b,
+				//	1.0
+				//);
+
+				return float4(
+					bicubic_sample_2d(input_texture0, uv + direction * distortion.r, input_texture0_size).r,
+					bicubic_sample_2d(input_texture0, uv + direction * distortion.g, input_texture0_size).g,
+					bicubic_sample_2d(input_texture0, uv + direction * distortion.b, input_texture0_size).b,
+					1.0
+				);
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				float2 flip_uv = float2(1.0, 1.0) - input.uv; 
+				float2 texel_size = inv_input_texture0_size;
+				float2 screen_center = float2(0.5, 0.5);
+				
+				float2 ghost_vector = (screen_center - flip_uv);
+				float2 normalized_ghost_vector = length(ghost_vector) < 0.001 ? 0 : normalize(ghost_vector);
+				float3 distortion = float3(-texel_size.x * chroma_distortion, 0.0, texel_size.y * chroma_distortion);
+				
+				// sample ghosts
+				float4 result = 0.0;
+				for (int i = 1; i < SAMPLE_COUNT; ++i) {
+					float2 sample_uv = flip_uv + ghost_vector * float(i) * ghost_dispersal;
+					
+					if (sample_uv.x >= 0.0 && sample_uv.x <= 1.0 && 
+						sample_uv.y >= 0.0 && sample_uv.y <= 1.0)
+					{
+						float weight = length(screen_center - sample_uv) / length(screen_center);
+						weight = pow(1.0 - weight, 5.0);
+	
+						float2 lens_color_uv = float2(float(i)/float(SAMPLE_COUNT), 0.5);
+						float4 ghost_tint_value = lerp(TEX2D(ghosts_color_map, lens_color_uv), 1, 1.0 - ghost_tint);
+
+						result += texture_distorted(sample_uv, normalized_ghost_vector, distortion) * weight * ghost_tint_value;
+					}
+				}
+				
+				// Sample 1D lens color texture
+				float2 lens_color_uv = float2(length(screen_center - flip_uv) / length(screen_center), 0.0);
+				result *= lerp(TEX2D(lens_color_map, lens_color_uv), 1, 1.0 - flare_tint) * max(0, flare_intensity);
+				
+				return result;
+			}	
+		"""
+	}
+
+	flare_merge_pass = {
+		includes = [ "common", "gbuffer_access", "color_management" ]
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_linear" }
+			input_texture1 = { sampler_states = "clamp_linear" }
+		}
+
+		code="""
+			DECLARE_SAMPLER_2D(input_texture0);
+			DECLARE_SAMPLER_2D(input_texture1);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};
+
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float3 flare_threshold_offset_falloff;
+			CBUFFER_END
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				float4 p = mul(input.position, world_view_proj);
+				o.position = p;
+				o.uv = input.uv;
+
+				return o;
+			}
+
+			half4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				float4 c = TEX2D(input_texture0, input.uv);
+				float4 a = TEX2D(input_texture1, input.uv);
+
+				return c + a;
+			}
+		"""
+	}
+
+	ACES_scene_combine = {
+		includes = [ "common", "gbuffer_access", "color_management" ]
+		samplers = {
+			input_texture0 = { sampler_states = "clamp_point" }
+		}
+
+		code="""
+			DECLARE_SAMPLER_2D(input_texture0);
+
+			struct VS_INPUT {
+				float4 position : POSITION;
+				float2 uv : TEXCOORD0;				
+			};
+
+			struct PS_INPUT {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+			};			 			
+
+			CBUFFER_START(c0)
+				float4x4 world_view_proj;
+				float noise_black;
+				float noise_white;
+				float noise_chroma;
+			CBUFFER_END
+
+
+			PS_INPUT vs_main(VS_INPUT input) {
+				PS_INPUT o;
+				o.position = mul(input.position, world_view_proj);
+				o.uv = input.uv;
+
+				return o;
+			}
+
+			static const float3x3 ACESInputMat = {
+				{0.59719, 0.35458, 0.04823},
+				{0.07600, 0.90834, 0.01566},
+				{0.02840, 0.13383, 0.83777}
+			};
+
+			// ODT_SAT => XYZ => D60_2_D65 => sRGB
+			static const float3x3 ACESOutputMat = {
+				{ 1.60475, -0.53108, -0.07367},
+				{-0.10208,  1.10813, -0.00605},
+				{-0.00327, -0.07276,  1.07602}
+			};
+
+			float3 RRTAndODTFit(float3 v) {
+				float3 a = v * (v + 0.0245786f) - 0.000090537f;
+				float3 b = v * (0.983729f * v + 0.4329510f) + 0.238081f;
+				return a / b;
+			}
+
+			float3 ACESFitted(float3 color) {
+				color = mul(ACESInputMat, color);
+
+				// Apply RRT and ODT
+				color = RRTAndODTFit(color);
+				color = mul(ACESOutputMat, color);
+				color = saturate(color);
+
+				return pow(color, 1.f/2.2f);
+			}
+
+			float mod(float x, float y) {
+				return x - y * floor(x/y);
+			}
+
+			float3 film_grain(float3 color, float2 uv, float strength, float chroma) {
+				float noise1 = (uv.x + 4.0) * (uv.y + 4.0) * (time * 10.0);
+				float noise2 = (uv.x + 5.0) * (uv.y + 5.0) * (time * 11.0);
+				float noise3 = (uv.x + 6.0) * (uv.y + 6.0) * (time * 12.0);
+				float grain1 = (mod((mod(noise1, 13.0) + 1.0) * (mod(noise1, 123.0) + 1.0), 0.01) - 0.005) * strength;
+				float grain2 = (mod((mod(noise2, 13.0) + 1.0) * (mod(noise2, 123.0) + 1.0), 0.01) - 0.005) * strength;
+				float grain3 = (mod((mod(noise3, 13.0) + 1.0) * (mod(noise3, 123.0) + 1.0), 0.01) - 0.005) * strength;
+				return color + lerp(grain1, float3(grain1, grain2, grain3), chroma);
+			}
+
+			float4 ps_main(PS_INPUT input) : SV_TARGET0 {
+				float4 c = TEX2D(input_texture0, input.uv);
+
+				c.rgb = ACESFitted(c.rgb * 2.f);
+
+				float lum = luminance(c.rgb);
+				c.rgb = film_grain(c.rgb, input.uv, lerp(noise_black, noise_white, lum*lum), noise_chroma);
+
+				return c;
+			}	
+		"""
+	}
+}
+
+shaders = {
+	flare_bright_pass = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="flare_bright_pass" render_states="filter" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[] }
+			]
+		}
+	}
+
+	flare_merge_pass = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="flare_merge_pass" render_states="filter" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[] }
+			]
+		}
+	}
+
+	ghosts_bright_pass = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="ghosts_bright_pass" render_states="filter" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	lens_flare = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="lens_flare" render_states="filter" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+
+	ACES_scene_combine = {
+		editor_advanced_mode = true
+
+		contexts = {
+			default = {
+				passes_sort_mode="immediate"
+				passes = [
+					{ hlsl_shader="ACES_scene_combine" render_states="filter" }
+				]
+			}
+		}
+
+		compile = {
+			default = [
+				{ defines=[""] }
+			]
+		}
+	}
+}
+
+static_compile= [
+	{ shader="flare_bright_pass" defines=["SHORT"] }
+	{ shader="flare_bright_pass" defines=["LONG"] }
+	{ shader="flare_merge_pass" }
+	
+	{ shader="ghosts_bright_pass" }
+	{ shader="lens_flare" }
+	{ shader="ACES_scene_combine" }
+]

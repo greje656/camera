@@ -1,0 +1,10 @@
+shading_component_mapping = {
+	flare_threshold_offset_falloff = { type="vector3" ype="vector3" path={ x = ["lens_flare_threshold"] y = ["lens_flare_offset"] z = ["lens_flare_falloff"] } }
+
+	flare_threshold = { type="scalar" path=["flare_threshold"] }
+	ghost_dispersal = { type="scalar" path=["ghost_dispersal"] }
+	chroma_distortion = { type="scalar" path=["chroma_distortion"] }
+	flare_intensity = { type="scalar" path=["flare_intensity"] }
+	ghost_tint = { type="scalar" path=["ghost_tint"] }
+	flare_tint = { type="scalar" path=["flare_tint"] }
+}
